@@ -2,82 +2,98 @@ import streamlit as st
 import pandas as pd
 import pickle
 import numpy as np
+import xgboost as xgb
 
 # Page configuration
-st.set_page_config(page_title="Student Performance Predictor", layout="centered")
+st.set_page_config(page_title="Student Success Predictor", layout="centered")
 
 # Custom CSS for a clean, aesthetic look
 st.markdown("""
     <style>
     .main {
-        background-color: #f5f7f9;
+        background-color: #f8f9fa;
     }
-    .stButton>button {
-        width: 100%;
-        border-radius: 5px;
-        height: 3em;
-        background-color: #4CAF50;
+    .stSelectbox, .stNumberInput, .stSlider {
+        margin-bottom: 10px;
+    }
+    div.stButton > button:first-child {
+        background-color: #007bff;
         color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 10px 20px;
         font-weight: bold;
+        transition: 0.3s;
     }
-    .prediction-card {
-        padding: 20px;
-        border-radius: 10px;
+    div.stButton > button:hover {
+        background-color: #0056b3;
+        color: white;
+    }
+    .result-card {
+        padding: 25px;
+        border-radius: 12px;
         background-color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        text-align: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
     }
     </style>
     """, unsafe_allow_html=True)
 
-# Load the model
+# Load the model with error handling
 @st.cache_resource
 def load_model():
-    with open('XG_Boost.pkl', 'rb') as f:
-        model = pickle.load(f)
-    return model
+    try:
+        with open('XG_Boost.pkl', 'rb') as f:
+            model = pickle.load(f)
+        return model
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        return None
 
 model = load_model()
 
-st.title("🎓 Student Performance Predictor")
-st.markdown("Enter the student details below to predict academic outcomes.")
-
-# Creating columns for a smoother layout
-col1, col2 = st.columns(2)
-
-with col1:
-    gender = st.selectbox("Gender", options=[0, 1], format_func=lambda x: "Male" if x == 1 else "Female")
-    age = st.number_input("Age", min_value=10, max_value=25, value=18)
-    study_hours = st.number_input("Study Hours Per Week", min_value=0, max_value=168, value=15)
-    parent_edu = st.selectbox("Parent Education Level", options=[0, 1, 2, 3], help="0: Low to 3: High")
-    internet = st.selectbox("Internet Access", options=[0, 1], format_func=lambda x: "Yes" if x == 1 else "No")
-
-with col2:
-    attendance = st.slider("Attendance Rate (%)", 0.0, 100.0, 85.0)
-    extracurricular = st.selectbox("Extracurricular Activities", options=[0, 1], format_func=lambda x: "Yes" if x == 1 else "No")
-    prev_score = st.number_input("Previous Score", min_value=0, max_value=100, value=75)
-    final_score = st.number_input("Current/Final Score", min_value=0, max_value=100, value=80)
-
-# Prediction Logic
-if st.button("Analyze Performance"):
-    # Prepare the feature array based on the model's expected order
-    features = np.array([[
-        gender, age, study_hours, attendance, 
-        parent_edu, internet, extracurricular, 
-        prev_score, final_score
-    ]])
+if model:
+    st.title("🎓 Student Performance Analytics")
+    st.write("Predict academic success based on student metrics.")
     
-    # Getting prediction and probability
-    prediction = model.predict(features)[0]
-    # The pkl shows binary:logistic, so we can get probabilities 
-    probability = model.predict_proba(features)[0][1]
+    with st.container():
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
 
-    st.markdown("---")
-    
-    # Displaying results in a clean card
-    if prediction == 1:
-        st.success(f"### High Success Probability: {probability:.2%}")
-        st.balloons()
+        with col1:
+            # Map inputs to the feature names found in the pkl metadata [cite: 12, 13]
+            gender = st.selectbox("Gender", options=[0, 1], format_func=lambda x: "Male" if x == 1 else "Female")
+            age = st.number_input("Age", min_value=12, max_value=25, value=18)
+            study_hours = st.number_input("Study Hours/Week", min_value=0, max_value=100, value=20)
+            parent_edu = st.selectbox("Parent Education Level", options=[0, 1, 2, 3, 4], help="Higher values indicate higher education")
+            internet = st.selectbox("Internet Access", options=[0, 1], format_func=lambda x: "Available" if x == 1 else "No Access")
+
+        with col2:
+            attendance = st.slider("Attendance Rate (%)", 0.0, 100.0, 90.0)
+            extracurricular = st.selectbox("Extracurriculars", options=[0, 1], format_func=lambda x: "Yes" if x == 1 else "No")
+            prev_score = st.number_input("Previous Score", min_value=0, max_value=100, value=75)
+            final_score = st.number_input("Final Score", min_value=0, max_value=100, value=80)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if st.button("Generate Prediction"):
+        # Features must be in this specific order to match the model [cite: 12]
+        features = np.array([[
+            gender, age, study_hours, attendance, 
+            parent_edu, internet, extracurricular, 
+            prev_score, final_score
+        ]])
+        
+        # Binary prediction 
+        prediction = model.predict(features)[0]
+        # Probability based on binary:logistic objective [cite: 10, 11]
+        probability = model.predict_proba(features)[0][1]
+
+        st.markdown("---")
+        if prediction == 1:
+            st.success(f"### High Performance Likely")
+            st.metric("Confidence Level", f"{probability:.1%}")
+            st.balloons()
+        else:
+            st.warning(f"### Potential Academic Risk")
+            st.metric("Confidence Level", f"{1-probability:.1%}")
     else:
-        st.warning(f"### At-Risk Probability: {1 - probability:.2%}")
-        st.info("Recommendation: Consider academic intervention or mentorship.")
+        st.info("Fill in the student metrics above and click 'Generate Prediction'.")
